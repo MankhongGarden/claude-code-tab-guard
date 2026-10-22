@@ -1,0 +1,5 @@
+state/
+node_modules/
+__pycache__/
+*.log
+cli-first.txt

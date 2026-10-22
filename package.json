@@ -1,0 +1,12 @@
+{
+  "name": "claude-code-tab-guard",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Claude Code hook that keeps parallel sessions sharing one Chromium from touching each other's tabs.",
+  "type": "module",
+  "license": "MIT",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "test": "node --test"
+  }
+}

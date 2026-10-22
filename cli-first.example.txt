@@ -1,0 +1,3 @@
+CLI-FIRST CHECK: before driving the browser, ask whether a CLI or API can do this job.
+- GitHub -> gh · cloud consoles -> their CLI · files -> the shell
+If one exists, use it. If the job really needs the UI (login/2FA, a site with no API), continue and tell the user in one line why the browser was needed.
