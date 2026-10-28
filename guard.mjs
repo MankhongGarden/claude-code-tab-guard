@@ -109,6 +109,9 @@ function parsePages(text) {
   }
   return Object.keys(pages).length ? { pages, selected } : null;
 }
+function sameOrigin(a, b) {
+  try { return new URL(a).origin === new URL(b).origin; } catch { return false; }
+}
 function sameTarget(pageUrl, wanted) {
   try {
     const a = new URL(pageUrl), b = new URL(wanted);
@@ -209,8 +212,11 @@ async function hookMain() {
     s.targets = s.targets.filter(id => live.some(t => t.id === id));
     for (const tid of s.targets) {
       const t = live.find(x => x.id === tid);
-      const ids = t ? Object.keys(s.pages).filter(k => s.pages[k] === t.url).map(Number) : [];
-      if (ids.length === 1 && !s.owned.includes(ids[0])) { s.owned.push(ids[0]); log(`map tab ${tid.slice(0, 8)} -> page ${ids[0]}`); }
+      if (!t) continue;
+      const ids = Object.keys(s.pages).filter(k => s.pages[k] === t.url).map(Number);
+      const sameLive = live.filter(x => x.url === t.url);
+      if (!ids.length || ids.length !== sameLive.length || !sameLive.every(x => s.targets.includes(x.id))) continue;
+      for (const id of ids) if (!s.owned.includes(id)) { s.owned.push(id); log(`map tab ${tid.slice(0, 8)} -> page ${id}`); }
     }
     const mineUrls = new Set(s.targets.map(id => live.find(t => t.id === id)?.url));
     for (const pid of s.owned) {
@@ -245,13 +251,21 @@ async function hookMain() {
       }
       if (exact) own(exact, tool === 'mcp__deskctl__browser_open' ? 'browser_open' : ensureCmd ? 'chromium-ensure' : 'shell new');
       else if (s.snap) {
-        const now = await cdpTabs();
+        let now = await cdpTabs();
+        for (let i = 0; ensureCmd && i < 3 && (!now || now.every(t => s.snap.ids.includes(t.id))); i++) {
+          await new Promise(r => setTimeout(r, 1000));
+          now = await cdpTabs();
+        }
         if (now) {
           pruneOwners(now);
           const owners = loadOwners();
           const fresh = now.filter(t => !s.snap.ids.includes(t.id) && (!owners[t.id] || owners[t.id] === sid));
           const want = input.tool_input?.url || (cmd.match(/-Url\s+(?:"([^"]+)"|'([^']+)'|(\S+))/i) || []).slice(1).find(Boolean);
-          const chosen = want ? fresh.filter(t => sameTarget(t.url, want) || t.url === want) : [];
+          let chosen = want ? fresh.filter(t => sameTarget(t.url, want) || t.url === want) : [];
+          if (!chosen.length && want) {
+            const redirected = fresh.filter(t => sameOrigin(t.url, want));
+            if (redirected.length === 1) { chosen = redirected; log(`new tab ${redirected[0].id.slice(0, 8)} redirected ${want} -> ${redirected[0].url}`); }
+          }
           if (!chosen.length && fresh.length) log(`${fresh.length} new tab(s) after ${tool.split('__').pop()} but none match ${want ? 'the URL' : '(no -Url)'} · own none`);
           for (const t of chosen) own(t.id, `${tool.split('__').pop()} (diff)`, false);
         }
@@ -402,6 +416,18 @@ async function hookMain() {
       save();
       log(`own ${target} via chromium-ensure ${url}`);
       process.exit(0);
+    }
+  }
+
+  if (target != null && s.pages[target] && s.targets.length) {
+    const live = await cdpTabs();
+    const same = (live || []).filter(t => t.url === s.pages[target]);
+    if (same.length && same.every(t => s.targets.includes(t.id))) {
+      s.owned.push(target);
+      if (short === 'close_page') s.owned = s.owned.filter(id => id !== target);
+      save();
+      log(`own ${target} via tab id ${same[0].id.slice(0, 8)} (live url ${s.pages[target]})`);
+      allow(cliFirstTool);
     }
   }
 

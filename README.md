@@ -131,7 +131,8 @@ Hooks inherit Claude Code's environment, so set these as user environment variab
 ```
 
 - **Two kinds of ids.** CDP target ids (32 hex characters) are stable for the life of a tab and are the real ownership record. `chrome-devtools-mcp` page ids are small integers that the agent must pass; the hook maps between them by URL after every `list_pages`.
-- **Exact beats guessed.** An id printed by `chromium-ensure.ps1` or `deskctl browser_open` always wins. A tab found by diffing the tab list before and after is taken only if no other session owns it.
+- **Exact beats guessed.** An id printed by `chromium-ensure.ps1` or `deskctl browser_open` always wins. A tab found by diffing the tab list before and after is taken only if no other session owns it. If the site redirected (the new tab's URL no longer matches `-Url`), the diff still takes it when it is the only new tab on the same origin.
+- **Live URL of owned tabs.** Before denying a page id, the hook compares its URL with the current URL of the tabs this session owns by target id, so a tab that redirected after it was opened stays usable.
 - **Sessions are told what to do.** Every deny message lists the session's own tabs and the commands that open a new one.
 - **`claim`.** `! node guard.mjs claim <pageId|tab id>` typed by the user (the `!` prefix runs it as the user, and Claude Code passes `CLAUDE_CODE_SESSION_ID`) gives that tab to the current session. `whoami` prints the session id.
 - **Fail closed.** An exception in the pre phase denies the call and logs to `guard.log`. If the CDP port does not answer, devtools calls still go through the page-id checks.
@@ -154,7 +155,7 @@ Hooks inherit Claude Code's environment, so set these as user environment variab
 ## Limitations
 
 - **Text parsing of `list_pages`.** Page ids and URLs come from `chrome-devtools-mcp`'s human-readable output (`N: <url> [selected]`). A format change will make the hook deny everything until it is updated. Fails closed, so this is annoying but not dangerous.
-- **Same URL in two tabs.** Page-id to target-id mapping is by URL. If two tabs show the same URL, the hook does not bind either by guesswork.
+- **Same URL in two tabs.** Page-id to target-id mapping is by URL. If two tabs show the same URL and all of them belong to this session, all their page ids are bound. If any of them belongs to another session or to no one, the hook does not bind either by guesswork.
 - **Not a security boundary.** It stops accidents between cooperating sessions. A session that writes its own CDP client (Python, a fresh script) bypasses it. It also does not isolate cookies: every session shares the profile's logins.
 - **Windows-only helpers.** `chromium-*.ps1` use `Get-CimInstance`, `Start-Process` and `%LOCALAPPDATA%`. The hook itself is plain Node and only needs the CDP HTTP endpoint.
 - **Uses hook features of recent Claude Code.** The `if` field on hook entries and the `CLAUDE_PID` / `CLAUDE_CODE_SESSION_ID` variables were present on Claude Code 2.1.308. Without `if`, drop those entries' conditions and the hook still works, just started more often.

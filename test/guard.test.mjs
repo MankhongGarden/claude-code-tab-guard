@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 const GUARD = join(dirname(fileURLToPath(import.meta.url)), '..', 'guard.mjs');
-const TAB_A = 'A'.repeat(32), TAB_B = 'B'.repeat(32);
+const TAB_A = 'A'.repeat(32), TAB_B = 'B'.repeat(32), TAB_R1 = 'C'.repeat(32), TAB_R2 = 'D'.repeat(32);
 let tabs = [];
 let server, port, stateDir;
 
@@ -75,6 +75,38 @@ test('chromium-ensure without targetId: select_page of the pending URL claims it
   assert.ok(denied(await run('pre', { session_id: 's4', tool_name: 'mcp__chrome-devtools__select_page', tool_input: { pageId: 1 } })));
   assert.ok(!denied(await run('pre', { session_id: 's4', tool_name: 'mcp__chrome-devtools__select_page', tool_input: { pageId: 2 } })));
   assert.ok(!denied(await run('pre', { session_id: 's4', tool_name: 'mcp__chrome-devtools__click', tool_input: { pageId: 2 } })));
+});
+
+test('chromium-ensure without targetId: a redirected new tab on the same origin is owned', async () => {
+  tabs = [{ id: 'F'.repeat(32), type: 'page', url: 'https://old.example/', title: 'old' }];
+  const cmd = 'pwsh -File chromium-ensure.ps1 -Url https://r.example/settings';
+  await run('pre', { session_id: 's7', tool_name: 'PowerShell', tool_input: { command: cmd } });
+  tabs = [{ id: TAB_R1, type: 'page', url: 'https://r.example/new#settings', title: 'R' }];
+  await run('post', { session_id: 's7', tool_name: 'PowerShell', tool_input: { command: cmd }, tool_response: { stdout: '{"ok":true,"mode":"mcp"}' } });
+  await run('post', { session_id: 's7', tool_name: 'mcp__chrome-devtools__list_pages', tool_input: {},
+    tool_response: pagesText(['1: https://r.example/new#settings']) });
+  assert.ok(!denied(await run('pre', { session_id: 's7', tool_name: 'mcp__chrome-devtools__select_page', tool_input: { pageId: 1 } })));
+  assert.ok(!denied(await run('pre', { session_id: 's7', tool_name: 'mcp__chrome-devtools__take_snapshot', tool_input: { pageId: 1 } })));
+});
+
+test('duplicate-URL tabs: allowed when all are this chat\'s, denied when one is another chat\'s', async () => {
+  const dup = 'https://r.example/new#settings';
+  tabs = [{ id: TAB_R1, type: 'page', url: dup, title: 'R' }, { id: TAB_R2, type: 'page', url: dup, title: 'R' }];
+  const cmd = 'pwsh -File chromium-ensure.ps1 -Url https://r.example/settings';
+  await run('pre', { session_id: 's7', tool_name: 'PowerShell', tool_input: { command: cmd } });
+  await run('post', { session_id: 's7', tool_name: 'PowerShell', tool_input: { command: cmd }, tool_response: { stdout: `{"ok":true,"mode":"tab","targetId":"${TAB_R2}"}` } });
+  await run('post', { session_id: 's7', tool_name: 'mcp__chrome-devtools__list_pages', tool_input: {}, tool_response: pagesText([`1: ${dup}`, `2: ${dup}`]) });
+  assert.ok(!denied(await run('pre', { session_id: 's7', tool_name: 'mcp__chrome-devtools__take_snapshot', tool_input: { pageId: 2 } })));
+  const T = '9'.repeat(32), U = '8'.repeat(32), other = 'https://dup.example/';
+  tabs = [{ id: T, type: 'page', url: other, title: 'D' }, { id: U, type: 'page', url: other, title: 'D' }];
+  for (const [sid, id] of [['s8', T], ['s9', U]]) {
+    const c = `pwsh -File chromium-ensure.ps1 -Url ${other}`;
+    await run('pre', { session_id: sid, tool_name: 'PowerShell', tool_input: { command: c } });
+    await run('post', { session_id: sid, tool_name: 'PowerShell', tool_input: { command: c }, tool_response: { stdout: `{"ok":true,"mode":"tab","targetId":"${id}"}` } });
+  }
+  await run('post', { session_id: 's8', tool_name: 'mcp__chrome-devtools__list_pages', tool_input: {}, tool_response: pagesText([`1: ${other}`, `2: ${other}`]) });
+  assert.ok(denied(await run('pre', { session_id: 's8', tool_name: 'mcp__chrome-devtools__take_snapshot', tool_input: { pageId: 1 } })));
+  assert.ok(denied(await run('pre', { session_id: 's8', tool_name: 'mcp__chrome-devtools__take_snapshot', tool_input: { pageId: 2 } })));
 });
 
 test('shell CDP close of another chat\'s tab is denied, own tab allowed', async () => {
